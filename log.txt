@@ -1,0 +1,33 @@
+.midi -ls
+.midi -ls
+.midi 54
+.midi -ls
+.midi 51
+.midi -stop
+.midi -ls
+.midi 47
+.midi 47
+.midi 51
+.midi 48
+.midi 49
+.midi 50
+.midi 46
+.midi 45
+.midi 44
+.midi -ls
+.midi 45
+.midi -ls
+.midi -46
+.midi 46
+.midi -ls
+.midi 48
+.midi 47
+.midi -stop
+.midi 47
+.midi -ls
+.help
+.list
+.play 0
+.play 2
+.play 53
+.quit

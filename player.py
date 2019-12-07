@@ -2,15 +2,16 @@ import asyncio
 import glob
 import json
 import os
+import sys
 import threading
 import time
-import sys
-
-import drum_set
-import instruments_map
+import math
 
 import mido
 import websockets
+
+import drum_set
+import instruments_map
 
 
 def cmd(line):
@@ -46,8 +47,9 @@ sub = json.dumps({
 helpmsg = {
     '.test': '测试用命令    \u00a7c.test',
     '.help': '提供帮助/命令列表    \u00a7c.help',
-    '.function': '运行在相应的功能文件中找到的命令    \u00a7c.function <function>',
-    '.midi': '播放一个mid文件    \u00a7c.midi <file>'
+    '.play': '播放一个mid文件    \u00a7c.play <ID>',
+    '.stop': '停止播放    \u00a7c.stop',
+    '.list': '列出mid文件    \u00a7c.list [页码]'
 }
 
 play = True
@@ -87,14 +89,16 @@ def midiDisplay(midimsg):
 def play_note(midimsg, inst):
     origin = midimsg.note - 66
     instrument = instruments_map.inst_map[inst]
-    pitch = 2 ** ((origin+instrument[1]*12) / 12)
+    pitch = 2 ** ((origin+instrument[1]) / 12)
     volume = midimsg.velocity / 128
     return cmd("execute @a ~ ~ ~ playsound "+instrument[0]+" @s ^0 ^ ^ " + str(volume) + " " + str(pitch))
 
+
 def play_perc(midimsg):
     instrument = drum_set.drum_set[midimsg.note]
+    pitch = 2 ** (instrument[1] / 12)
     volume = midimsg.velocity / 128
-    return cmd("execute @a ~ ~ ~ playsound "+instrument+" @s ^0 ^ ^ " + str(volume))
+    return cmd("execute @a ~ ~ ~ playsound "+instrument[0]+" @s ^0 ^ ^ " + str(volume) + " " + str(pitch))
 
 
 def runmain(coroutine):
@@ -111,14 +115,16 @@ class midiplayer(threading.Thread):
         self.playing = False
         self.mid = None
         self.setName('Midi Player Thread')
+        self.isPlaying=False
 
     def run(self):
         while True:
             if self.playing:
                 inst = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                self.isPlaying=True
                 try:
                     for msg in self.mid.play():
-                        if msg.type == "note_on":
+                        if msg.type == "note_on" and msg.velocity != 0:
                             if msg.channel != 9:
                                 runmain(self.ws.send(
                                     play_note(msg, inst[msg.channel])))
@@ -128,6 +134,7 @@ class midiplayer(threading.Thread):
                             inst[msg.channel] = msg.program
                             print(inst)
                         if not self.playing:
+                            self.isPlaying=False
                             break
                 except Exception as e:
                     runmain(self.ws.send(info(e)))
@@ -140,8 +147,13 @@ class midiplayer(threading.Thread):
     def play(self):
         self.playing = True
 
-    def stop(self):
+    async def stop(self):
+        await self.ws.send(info("正在停止"))
         self.playing = False
+        while self.isPlaying:
+            pass
+        await self.ws.send(info("已停止"))
+        return
 
 
 def setBlock(x, y, z, id, data=0):
@@ -155,6 +167,13 @@ def miidDisplay():
     return out+'"}]}'
 
 
+def nextItem(_list, start):
+    index = start
+    while index < len(_list):
+        yield _list[index]
+        index += 1
+
+
 async def hello(ws, path):
 
     player = midiplayer(ws)
@@ -164,7 +183,7 @@ async def hello(ws, path):
 
     sender = "外部"
 
-    log = open('log.txt', 'a')
+    #log = open('log.txt', 'a')
 
     while True:
         data = await ws.recv()
@@ -175,7 +194,7 @@ async def hello(ws, path):
 
                 raw = getChat(msg)
 
-                log.write(raw+"\n")
+                # log.write(raw+"\n")
 
                 args = raw.split(" ")
 
@@ -186,35 +205,43 @@ async def hello(ws, path):
                     for i in helpmsg:
                         await ws.send(info(i + " - " + helpmsg[i]))
 
-                if args[0] == ".quit":
-                    log.close()
+                if args[0] == ".exit":
+                    # log.close()
                     sys.exit()
 
-                if args[0] == ".midi":
+                if args[0] == ".list":
                     try:
-                        midils = glob.glob("midis/*.mid")
-                        if args[1] == "-ls":
-                            for i in range(len(midils)):
-                                await ws.send(info('[§c{0}§d] - {1}'.format(i, midils[i])))
-                        elif args[1] == "-stop":
-                            player.stop()
-                            await ws.send(info("正在停止"))
+                        page = 1
+                        if len(args) != 1:
+                            page = int(args[1])
+                        midils = glob.glob("midis/**/*.mid", recursive=True)
+                        iterator = nextItem(midils, (page-1)*10)
+                        for i in range(10):
+                            num = (page-1)*10+i
+                            await ws.send(info('[§c{0}§d] - {1}'.format(num, next(iterator))))
+                        await ws.send(info('第 {0} 页，共 {1} 页'.format(page, math.ceil(len(midils)/10))))
+                    except StopIteration as e:
+                        pass
+                    except ValueError as e:
+                        await ws.send(info('语法错误'))
+
+                if args[0] == ".stop":
+                    await player.stop()
+
+                if args[0] == ".play":
+                    try:
+                        midils = glob.glob("midis/**/*.mid", recursive=True)
+                        arg1 = int(args[1])
+                        if arg1 < len(midils):
+                            await player.stop()
+                            await ws.send(info("正在加载 " + midils[arg1] + "..."))
+                            player.set_midi(midils[arg1])
+                            player.play()
+                            await ws.send(miidDisplay())
                         else:
-                            arg1 = int(args[1])
-                            if arg1 < len(midils):
-                                await ws.send(info("正在加载 " + midils[arg1] + "..."))
-                                player.stop()
-                                player.set_midi(midils[arg1])
-                                player.play()
-                                await ws.send(miidDisplay())
-                                """ 
-                                mid = mido.MidiFile(midils[arg1])
-                                for msg in mid.play():
-                                    if msg.type == "note_on":
-                                        print(msg)
-                                        await ws.send(play_note(msg)) """
-                            else:
-                                await ws.send(info("文件不存在"))
+                            await ws.send(info("文件不存在"))
+                    except KeyboardInterrupt:
+                        sys.exit()
                     except Exception as e:
                         await ws.send(info(str(e)))
 
