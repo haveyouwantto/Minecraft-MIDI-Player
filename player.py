@@ -49,7 +49,8 @@ helpmsg = {
     '.help': '提供帮助/命令列表    \u00a7c.help',
     '.play': '播放一个mid文件    \u00a7c.play <ID>',
     '.stop': '停止播放    \u00a7c.stop',
-    '.list': '列出mid文件    \u00a7c.list [页码]'
+    '.list': '列出mid文件    \u00a7c.list [页码]',
+    '.search':'搜索mid文件    \u00a7c.search <内容>'
 }
 
 play = True
@@ -115,13 +116,13 @@ class midiplayer(threading.Thread):
         self.playing = False
         self.mid = None
         self.setName('Midi Player Thread')
-        self.isPlaying=False
+        self.isPlaying = False
 
     def run(self):
         while True:
             if self.playing:
                 inst = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-                self.isPlaying=True
+                self.isPlaying = True
                 try:
                     for msg in self.mid.play():
                         if msg.type == "note_on" and msg.velocity != 0:
@@ -134,7 +135,7 @@ class midiplayer(threading.Thread):
                             inst[msg.channel] = msg.program
                             print(inst)
                         if not self.playing:
-                            self.isPlaying=False
+                            self.isPlaying = False
                             break
                 except Exception as e:
                     runmain(self.ws.send(info(e)))
@@ -244,6 +245,16 @@ async def hello(ws, path):
                         sys.exit()
                     except Exception as e:
                         await ws.send(info(str(e)))
+
+                if args[0] == ".search":
+                    midils = glob.glob("midis/**/*.mid", recursive=True)
+                    keyword = "".join(args[1:])
+                    results = []
+                    for i in range(len(midils)):
+                        if keyword in midils[i]:
+                            results.append((i, midils[i]))
+                    for i in results:
+                        await ws.send(info('[§c{0}§d] - {1}'.format(i[0], i[1])))
 
         elif msg["header"]["messagePurpose"] == "commandResponse":
             pass
